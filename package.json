@@ -1,0 +1,17 @@
+{
+  "name": "omp-pty-session",
+  "version": "1.0.0",
+  "description": "Persistent PTY session manager for oh-my-pi with xterm.js screen capture",
+  "omp": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0-beta29",
+    "@xterm/headless": "^6.0.0"
+  },
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": "*"
+  }
+}
