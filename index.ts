@@ -243,7 +243,7 @@ export default function ptySession(pi: ExtensionAPI) {
       const waitedMs = result?.details?.waitedMs || 0;
       const durStr = dur ? theme.fg("muted", " · ") + theme.fg("fg", dur) : "";
       return renderComp([
-        theme.fg("muted", "── ") + theme.fg("success", "✓") + " " + theme.fg("accent", "tui_interact") + theme.fg("muted", " · " + keys.length + " keys sent") + durStr + theme.fg("muted", " ──"),
+        theme.fg("muted", "── ") + theme.fg("success", "✓") + " " + theme.fg("accent", "tui_interact") + theme.fg("muted", " · ") + theme.fg("fg", keys.length + " keys") + theme.fg("muted", " sent") + durStr + theme.fg("muted", " ──"),
         theme.fg("muted", "  Keys: ") + theme.fg("fg", keys.length > 4 ? keys.slice(0, 4).join(", ") + " +" + (keys.length - 4) + " more" : keys.join(", ")),
         theme.fg("muted", "  Strategy: ") + theme.fg("fg", strategy) + theme.fg("muted", " · Waited: ") + theme.fg("fg", waitedMs + "ms"),
         theme.fg("muted", "──"),
@@ -357,7 +357,7 @@ export default function ptySession(pi: ExtensionAPI) {
       const dur = result?.meta?.durationMs != null ? result.meta.durationMs + "ms" : "";
       const durStr = dur ? theme.fg("muted", " · ") + theme.fg("fg", dur) : "";
       const lines = [
-        theme.fg("muted", "── ") + theme.fg("success", "✓") + " " + theme.fg("accent", "tui_probe") + theme.fg("muted", " · " + count + " focusable element" + (count !== 1 ? "s" : "")) + durStr + theme.fg("muted", " ──"),
+        theme.fg("muted", "── ") + theme.fg("success", "✓") + " " + theme.fg("accent", "tui_probe") + theme.fg("muted", " · ") + theme.fg("fg", count + " focusable element" + (count !== 1 ? "s" : "")) + durStr + theme.fg("muted", " ──"),
       ];
       for (const f of (result?.details?.focusables || [])) {
         lines.push(theme.fg("muted", "  [") + theme.fg("fg", f.tabIndex + 1) + theme.fg("muted", "] row ") + theme.fg("fg", f.cursorY) + theme.fg("muted", ", col ") + theme.fg("fg", f.cursorX));
@@ -526,7 +526,7 @@ export default function ptySession(pi: ExtensionAPI) {
       const text = result?.content?.[0]?.text || "";
       const sessionLines = text.split("\n").filter((l) => l.startsWith("- "));
       const lines = [
-        theme.fg("muted", "── ") + theme.fg("success", "✓") + " " + theme.fg("accent", "tui_list") + theme.fg("muted", " · " + sessionLines.length + " active session" + (sessionLines.length !== 1 ? "s" : "")) + theme.fg("muted", " ──"),
+        theme.fg("muted", "── ") + theme.fg("success", "✓") + " " + theme.fg("accent", "tui_list") + theme.fg("muted", " · ") + theme.fg("fg", sessionLines.length + " active session" + (sessionLines.length !== 1 ? "s" : "")) + theme.fg("muted", " ──"),
       ];
       for (let i = 0; i < sessionLines.length; i++) {
         const entry = sessionLines[i].replace(/^- /, "").trim();
@@ -570,7 +570,7 @@ export default function ptySession(pi: ExtensionAPI) {
       const sessionLines = text.split("\n").filter((l) => l.startsWith("- "));
       const current = result?.details?.currentSessionId || "none";
       const lines = [
-        theme.fg("muted", "── ") + theme.fg("success", "✓") + " " + theme.fg("accent", "tui_session") + theme.fg("muted", " · " + sessionLines.length + " session" + (sessionLines.length !== 1 ? "s" : "")) + theme.fg("muted", " ──"),
+        theme.fg("muted", "── ") + theme.fg("success", "✓") + " " + theme.fg("accent", "tui_session") + theme.fg("muted", " · ") + theme.fg("fg", sessionLines.length + " session" + (sessionLines.length !== 1 ? "s" : "")) + theme.fg("muted", " ──"),
       ];
       for (let i = 0; i < sessionLines.length; i++) {
         const entry = sessionLines[i].replace(/^- /, "").trim();
@@ -757,7 +757,7 @@ export default function ptySession(pi: ExtensionAPI) {
       const timeout = (args.timeout_ms ?? 30000) / 1000;
       const sid = args.id || lastSessionId || "?";
       return renderComp([
-        theme.fg("muted", "── ") + theme.fg("accent", "tui_wait") + theme.fg("muted", " · waiting for ") + theme.fg("fg", "\"" + pattern + "\"") + theme.fg("muted", " (timeout " + timeout + "s)") + theme.fg("muted", " ──"),
+        theme.fg("muted", "── ") + theme.fg("accent", "tui_wait") + theme.fg("muted", " · waiting for ") + theme.fg("fg", "\"" + pattern + "\"") + theme.fg("muted", " (timeout ") + theme.fg("fg", timeout + "s") + theme.fg("muted", ")") + theme.fg("muted", " ──"),
         theme.fg("muted", "  Session: ") + theme.fg("fg", sid),
         theme.fg("muted", "  ") + theme.fg("fg", "⠋ waiting..."),
       ]);
