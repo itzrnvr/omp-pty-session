@@ -166,17 +166,13 @@ export default function ptySession(pi: ExtensionAPI) {
     renderCall(args: any, theme: any) {
       const cmd = args.command || "?";
       const dims = `${args.cols ?? 100}×${args.rows ?? 30}`;
-      return renderComp([
-        theme.fg("muted", "Opening ") + theme.fg("accent", cmd) + theme.fg("muted", ` [${dims}]...`),
-      ]);
+      return renderComp([theme.fg("accent", "tui_open") + theme.fg("muted", " · opening ") + theme.fg("fg", cmd) + theme.fg("muted", ` [${dims}]`)]);
     },
     renderResult(result: any, options: any, theme: any) {
       const id = result?.details?.id || "?";
       const cmd = result?.details?.command || "?";
       const dims = `${result?.details?.cols || "?"}×${result?.details?.rows || "?"}`;
-      return renderComp([
-        theme.fg("success", "✓") + " " + theme.fg("accent", "tui_open") + ": " + cmd + theme.fg("muted", ` [${dims}] · ${id}`),
-      ]);
+      return renderComp([theme.fg("success", "✓") + " " + theme.fg("accent", "tui_open") + theme.fg("muted", " · ") + theme.fg("fg", cmd) + theme.fg("muted", ` [${dims}] · ${id}`)]);
     },
   });
 
@@ -212,17 +208,15 @@ export default function ptySession(pi: ExtensionAPI) {
       };
     },
     renderCall(args: any, theme: any) {
-      return renderComp([
-        theme.fg("muted", "Sending keys to ") + theme.fg("accent", args.id || "default") + theme.fg("muted", "..."),
-      ]);
+      const keys = args.keys || [];
+      const keySummary = keys.length > 4 ? keys.slice(0, 4).join(", ") + ` +${keys.length - 4} more` : keys.join(", ");
+      return renderComp([theme.fg("accent", "tui_interact") + theme.fg("muted", " · sending ") + theme.fg("fg", keySummary) + theme.fg("muted", " to ") + theme.fg("fg", args.id || "default")]);
     },
     renderResult(result: any, options: any, theme: any) {
       const keys = options?.keys || [];
       const keySummary = keys.length > 4 ? keys.slice(0, 4).join(", ") + ` +${keys.length - 4} more` : keys.join(", ");
       const strategy = result?.details?.strategy || "";
-      return renderComp([
-        theme.fg("success", "✓") + " " + theme.fg("accent", "tui_interact") + ": " + keySummary + theme.fg("muted", ` · ${strategy}`),
-      ]);
+      return renderComp([theme.fg("success", "✓") + " " + theme.fg("accent", "tui_interact") + theme.fg("muted", " · ") + theme.fg("fg", keySummary) + theme.fg("muted", ` · ${strategy}`)]);
     },
   });
 
@@ -251,9 +245,7 @@ export default function ptySession(pi: ExtensionAPI) {
     },
     renderResult(result: any, options: any, theme: any) {
       const id = options?.id || "?";
-      return renderComp([
-        theme.fg("success", "✓") + " " + theme.fg("accent", "tui_capture") + ": " + id,
-      ]);
+      return renderComp([theme.fg("success", "✓") + " " + theme.fg("accent", "tui_capture") + theme.fg("muted", " · ") + theme.fg("fg", id)]);
     },
   });
 
@@ -308,13 +300,11 @@ export default function ptySession(pi: ExtensionAPI) {
       return { content: [{ type: "text", text: out }], details: { focusables } };
     },
     renderCall(args: any, theme: any) {
-      return renderComp([
-        theme.fg("muted", "Probing focusables (max ") + theme.fg("accent", String(args.max_tabs ?? 20)) + theme.fg("muted", " tabs)..."),
-      ]);
+      return renderComp([theme.fg("accent", "tui_probe") + theme.fg("muted", " · probing focusables (max ") + theme.fg("warning", String(args.max_tabs ?? 20)) + theme.fg("muted", " tabs)")]);
     },
     renderResult(result: any, options: any, theme: any) {
       const count = result?.details?.focusables?.length || 0;
-      return renderComp([theme.fg("success", "✓") + " " + theme.fg("accent", "tui_probe") + ": " + theme.fg("muted", `${count} focusable elements`)]);
+      return renderComp([theme.fg("success", "✓") + " " + theme.fg("accent", "tui_probe") + theme.fg("muted", ` · ${count} focusable elements`)]);
     },
   });
 
@@ -340,7 +330,7 @@ export default function ptySession(pi: ExtensionAPI) {
       return { content: [{ type: "text", text: result.formatted }] };
     },
     renderCall(args: any, theme: any) {
-      return renderComp([theme.fg("muted", `Resizing to ${args.cols}×${args.rows}...`)]);
+      return renderComp([theme.fg("accent", "tui_resize") + theme.fg("muted", " · resizing to ") + theme.fg("fg", `${args.cols}×${args.rows}`)]);
     },
   });
 
@@ -366,9 +356,7 @@ export default function ptySession(pi: ExtensionAPI) {
       return { content: [{ type: "text", text: result.formatted }] };
     },
     renderCall(args: any, theme: any) {
-      return renderComp([
-        theme.fg("muted", "Sending ") + theme.fg("accent", String(args.data?.length || 0)) + theme.fg("muted", " bytes..."),
-      ]);
+      return renderComp([theme.fg("accent", "tui_send_raw") + theme.fg("muted", " · sending ") + theme.fg("fg", String(args.data?.length || 0)) + theme.fg("muted", " bytes")]);
     },
   });
 
@@ -392,19 +380,17 @@ export default function ptySession(pi: ExtensionAPI) {
       return { content: [{ type: "text", text: result.formatted }], ...(result.success === false ? { isError: true } : {}) };
     },
     renderCall(args: any, theme: any) {
-      return renderComp([
-        theme.fg("muted", "Closing ") + theme.fg("accent", args.id || "default") + theme.fg("muted", "..."),
-      ]);
+      return renderComp([theme.fg("accent", "tui_close") + theme.fg("muted", " · closing ") + theme.fg("fg", args.id || "default")]);
     },
     renderResult(result: any, options: any, theme: any) {
       const ok = !result?.isError;
       const id = options?.id || "?";
       if (ok) {
-        return renderComp([theme.fg("success", "✓") + " " + theme.fg("muted", "Closed ") + theme.fg("accent", id)]);
+        return renderComp([theme.fg("success", "✓") + " " + theme.fg("accent", "tui_close") + theme.fg("muted", " · closed ") + theme.fg("fg", id)]);
       }
-      return renderComp([theme.fg("error", "✗") + " " + theme.fg("muted", "Not found")]);
+      return renderComp([theme.fg("error", "✗") + " " + theme.fg("accent", "tui_close") + theme.fg("muted", " · session not found")]);
     },
-  });
+});
 
   // ---------------------------------------------------------------------------
   // Tool: tui_list
@@ -422,9 +408,7 @@ export default function ptySession(pi: ExtensionAPI) {
     renderResult(result: any, options: any, theme: any) {
       const text = result?.content?.[0]?.text || "";
       const sessionLines = text.split("\n").filter((l: string) => l.startsWith("- ")) || [];
-      return renderComp([
-        theme.fg("success", "✓") + " " + theme.fg("accent", "tui_list") + ": " + theme.fg("muted", `${sessionLines.length} active sessions`),
-      ]);
+      return renderComp([theme.fg("success", "✓") + " " + theme.fg("accent", "tui_list") + theme.fg("muted", ` · ${sessionLines.length} active sessions`)]);
     },
   });
 
@@ -453,9 +437,7 @@ export default function ptySession(pi: ExtensionAPI) {
       const text = result?.content?.[0]?.text || "";
       const sessionLines = text.split("\n").filter((l: string) => l.startsWith("- ")) || [];
       const current = result?.details?.currentSessionId || "none";
-      return renderComp([
-        theme.fg("success", "✓") + " " + theme.fg("accent", "tui_session") + ": " + theme.fg("muted", `${sessionLines.length} sessions · current: `) + theme.fg("accent", current),
-      ]);
+      return renderComp([theme.fg("success", "✓") + " " + theme.fg("accent", "tui_session") + theme.fg("muted", ` · ${sessionLines.length} sessions · current: `) + theme.fg("fg", current)]);
     },
   });
 
@@ -482,9 +464,7 @@ export default function ptySession(pi: ExtensionAPI) {
       };
     },
     renderCall(args: any, theme: any) {
-      return renderComp([
-        theme.fg("muted", "Executing ") + theme.fg("accent", args.command || "?") + theme.fg("muted", "..."),
-      ]);
+      return renderComp([theme.fg("accent", "tui_exec") + theme.fg("muted", " · executing ") + theme.fg("fg", args.command || "?")]);
     },
   });
 
@@ -522,9 +502,7 @@ export default function ptySession(pi: ExtensionAPI) {
     renderResult(result: any, options: any, theme: any) {
       const id = options?.id || "?";
       const scrollLines = result?.details?.scrollLines || 0;
-      return renderComp([
-        theme.fg("success", "✓") + " " + theme.fg("accent", "tui_output") + ": " + id + theme.fg("muted", ` · ${scrollLines} scrollback lines`),
-      ]);
+      return renderComp([theme.fg("success", "✓") + " " + theme.fg("accent", "tui_output") + theme.fg("muted", " · ") + theme.fg("fg", id) + theme.fg("muted", ` · ${scrollLines} scrollback lines`)]);
     },
   });
 
@@ -555,9 +533,7 @@ export default function ptySession(pi: ExtensionAPI) {
     },
     renderResult(result: any, options: any, theme: any) {
       const id = options?.id || "?";
-      return renderComp([
-        theme.fg("success", "✓") + " " + theme.fg("accent", "tui_screenshot") + ": " + id,
-      ]);
+      return renderComp([theme.fg("success", "✓") + " " + theme.fg("accent", "tui_screenshot") + theme.fg("muted", " · ") + theme.fg("fg", id)]);
     },
   });
 
@@ -588,22 +564,18 @@ export default function ptySession(pi: ExtensionAPI) {
       };
     },
     renderCall(args: any, theme: any) {
-      return renderComp([
-        theme.fg("muted", "Waiting for '") + theme.fg("accent", args.pattern || "?") + theme.fg("muted", `' (timeout ${(args.timeout_ms ?? 30000) / 1000}s)...`),
-      ]);
+      const pattern = args.pattern || "?";
+      const timeout = (args.timeout_ms ?? 30000) / 1000;
+      return renderComp([theme.fg("accent", "tui_wait") + theme.fg("muted", " · waiting for ") + theme.fg("warning", `"${pattern}"`) + theme.fg("muted", ` (timeout ${timeout}s)`)]);
     },
     renderResult(result: any, options: any, theme: any) {
       const found = result?.details?.found;
       const pattern = options?.pattern || "?";
       const waitedMs = result?.details?.waitedMs || 0;
       if (found) {
-        return renderComp([
-          theme.fg("success", "✓") + " " + theme.fg("muted", "Pattern found: '") + theme.fg("accent", pattern) + theme.fg("muted", `' · ${waitedMs}ms`),
-        ]);
+        return renderComp([theme.fg("success", "✓") + " " + theme.fg("accent", "tui_wait") + theme.fg("muted", " · pattern ") + theme.fg("success", `"${pattern}"`) + theme.fg("muted", ` found · ${waitedMs}ms`)]);
       }
-      return renderComp([
-        theme.fg("error", "✗") + " " + theme.fg("muted", `Timeout: '${pattern}' not found`),
-      ]);
+      return renderComp([theme.fg("error", "✗") + " " + theme.fg("accent", "tui_wait") + theme.fg("muted", " · timeout: ") + theme.fg("warning", `"${pattern}"`) + theme.fg("muted", " not found")]);
     },
   });
 }
