@@ -1,4 +1,4 @@
-# pty-session
+# omp-pty-session
 
 Persistent terminal session extension for Oh My Pi. Gives the coding agent full interactive CLI capabilities — open shells, drive TUI applications, run background jobs, wait for output patterns, and take visual screenshots. 13 tools, all tested with mock LLM (zero cost).
 
@@ -6,8 +6,8 @@ Persistent terminal session extension for Oh My Pi. Gives the coding agent full 
 
 ```bash
 # Install in OMP extensions
-cp -r pty-session ~/.omp/agent/extensions/
-cd ~/.omp/agent/extensions/pty-session && bun install
+cp -r omp-pty-session ~/.omp/agent/extensions/
+cd ~/.omp/agent/extensions/omp-pty-session && bun install
 
 # Reload OMP (/reload-plugins or restart)
 ```
