@@ -97,6 +97,33 @@ async function call(method: string, params: Record<string, any> = {}): Promise<a
   });
 }
 
+// ── Render helpers ──
+// Inline visual indicators shown in the OMP conversation TUI when tools are invoked.
+// These render as pi-tui Components (render(width): string[]).
+
+function dim(s: string) { return `\x1b[2m${s}\x1b[0m`; }
+function bold(s: string) { return `\x1b[1m${s}\x1b[0m`; }
+function green(s: string) { return `\x1b[32m${s}\x1b[0m`; }
+function cyan(s: string) { return `\x1b[36m${s}\x1b[0m`; }
+function yellow(s: string) { return `\x1b[33m${s}\x1b[0m`; }
+
+function screenPreview(text: string, maxLines: number, width: number): string[] {
+  if (!text) return [dim("  (empty)")];
+  const lines = text.split("\n");
+  const shown = lines.slice(0, maxLines);
+  const out = shown.map(l => dim("│") + " " + l.substring(0, width - 4));
+  if (lines.length > maxLines) out.push(dim("└─") + " " + dim(`${lines.length - maxLines} more lines...`));
+  return out;
+}
+
+function boxed(lines: string[]): string[] {
+  if (lines.length === 0) return [];
+  return [dim("┌─") + " " + lines[0], ...lines.slice(1)];
+}
+
+function renderComp(lines: string[]) {
+  return { render: (_width: number) => lines };
+}
 // =============================================================================
 // Extension Factory
 // =============================================================================
@@ -154,6 +181,25 @@ export default function ptySession(pi: ExtensionAPI) {
         details: { id: result.id, pid: result.pid, command: result.command, cwd: result.cwd, cols: result.cols, rows: result.rows },
       };
     },
+    renderCall(args: any) {
+      const cmd = args.command || "?";
+      const dims = `${args.cols ?? 100}×${args.rows ?? 30}`;
+      return renderComp([
+        dim("┌─ Opening terminal") + " " + cyan(cmd) + dim(" [" + dims + "]"),
+        dim("└─") + " " + dim("⠋ settling..."),
+      ]);
+    },
+    renderResult(result: any) {
+      const id = result?.details?.id || "?";
+      const text = result?.content?.[0]?.text || "";
+      const screenText = text.match(/```\n([\s\S]*?)```/)?.[1] || "";
+      const dur = result?.details?.waitedMs ? `${result.details.waitedMs}ms` : "";
+      const lines = screenPreview(screenText, 5, 80);
+      return renderComp(boxed([
+        dim("Session") + " " + bold(green(id)) + dim(` · ${result?.details?.command || "?"} · ${dur}`),
+        ...lines,
+      ]));
+    },
   });
 
   // ---------------------------------------------------------------------------
@@ -187,6 +233,30 @@ export default function ptySession(pi: ExtensionAPI) {
         details: { id: params.id, strategy: result.strategy, waitedMs: result.waitedMs, samples: result.samples, isStable: result.isStable },
       };
     },
+    renderCall(args: any) {
+      const keys = (args.keys || []).slice(0, 8);
+      const more = (args.keys || []).length > 8 ? ` +${args.keys.length - 8} more` : "";
+      const keyList = keys.map((k: string) => {
+        const icon = k === "space" ? "␣" : k === "enter" ? "↵" : k === "tab" ? "⇥" : k === "escape" ? "⎋" : k === "backspace" ? "⌫" : k.startsWith("ctrl_") ? "^" + k.slice(5) : k.length > 8 ? k.slice(0,7)+"…" : k;
+        return dim("│  ") + bold(icon);
+      }).join("\n");
+      return renderComp([
+        dim("┌─ Sending to") + " " + cyan(args.id || "default") + (more ? dim(more) : ""),
+        keyList,
+        dim("└─") + " " + dim("⠋ settling..."),
+      ]);
+    },
+    renderResult(result: any) {
+      const text = result?.content?.[0]?.text || "";
+      const screenText = text.match(/```\n([\s\S]*?)```/)?.[1] || "";
+      const strategy = result?.details?.strategy || "";
+      const stable = result?.details?.isStable ? green("Stable ✓") : yellow("Unstable");
+      const lines = screenPreview(screenText, 6, 80);
+      return renderComp(boxed([
+        dim(`tui-interact · ${strategy} · `) + stable,
+        ...lines,
+      ]));
+    },
   });
 
   // ---------------------------------------------------------------------------
@@ -211,6 +281,12 @@ export default function ptySession(pi: ExtensionAPI) {
       });
 
       return { content: [{ type: "text", text: result.formatted }] };
+    },
+    renderResult(result: any) {
+      const text = result?.content?.[0]?.text || "";
+      const screenText = text.match(/```\n([\s\S]*?)```/)?.[1] || "";
+      const lines = screenPreview(screenText, 6, 80);
+      return renderComp(boxed([dim("Capture"), ...lines]));
     },
   });
 
@@ -264,6 +340,16 @@ export default function ptySession(pi: ExtensionAPI) {
 
       return { content: [{ type: "text", text: out }], details: { focusables } };
     },
+    renderCall(args: any) {
+      return renderComp([
+        dim("┌─ Probing focusables") + dim(` (max ${args.max_tabs ?? 20} tabs)`),
+        dim("└─") + " " + dim("⠋ cycling Tab..."),
+      ]);
+    },
+    renderResult(result: any) {
+      const count = result?.details?.focusables?.length || 0;
+      return renderComp([dim(`Probed ${count} focusable ${count === 1 ? "element" : "elements"}`)]);
+    },
   });
 
   // ---------------------------------------------------------------------------
@@ -286,6 +372,9 @@ export default function ptySession(pi: ExtensionAPI) {
       });
 
       return { content: [{ type: "text", text: result.formatted }] };
+    },
+    renderCall(args: any) {
+      return renderComp([dim(`Resizing to ${args.cols}×${args.rows}...`)]);
     },
   });
 
@@ -310,6 +399,10 @@ export default function ptySession(pi: ExtensionAPI) {
 
       return { content: [{ type: "text", text: result.formatted }] };
     },
+    renderCall(args: any) {
+      const preview = (args.data || "").substring(0, 40);
+      return renderComp([dim(`┌─ Raw send (${args.data?.length || 0} bytes)`), dim("│  ") + preview, dim("└─")]);
+    },
   });
 
   // ---------------------------------------------------------------------------
@@ -331,6 +424,13 @@ export default function ptySession(pi: ExtensionAPI) {
 
       return { content: [{ type: "text", text: result.formatted }], ...(result.success === false ? { isError: true } : {}) };
     },
+    renderCall(args: any) {
+      return renderComp([dim(`Closing ${args.id || "default session"}...`)]);
+    },
+    renderResult(result: any) {
+      const ok = !result?.isError;
+      return renderComp([ok ? green("Closed ✓") : yellow("Not found")]);
+    },
   });
 
   // ---------------------------------------------------------------------------
@@ -345,6 +445,18 @@ export default function ptySession(pi: ExtensionAPI) {
       const result = await call("list", {});
 
       return { content: [{ type: "text", text: result.formatted }] };
+    },
+    renderResult(result: any) {
+      const text = result?.content?.[0]?.text || "";
+      const sessionLines = text.split("\n").filter((l: string) => l.startsWith("- ")) || [];
+      return renderComp(boxed([
+        dim(`Active Sessions (${sessionLines.length})`),
+        ...sessionLines.slice(0, 10).map((l: string) => {
+          const id = l.match(/`([^`]+)`/)?.[1] || "?";
+          const rest = l.replace(/^- `[^`]+`/, "").trim();
+          return dim("│") + " " + bold(green("●")) + " " + cyan(id) + " " + dim(rest.substring(0, 50));
+        }),
+      ]));
     },
   });
 
@@ -369,6 +481,22 @@ export default function ptySession(pi: ExtensionAPI) {
         details: { currentSessionId: lastSessionId || null },
       };
     },
+    renderResult(result: any) {
+      const text = result?.content?.[0]?.text || "";
+      const sessionLines = text.split("\n").filter((l: string) => l.startsWith("- ")) || [];
+      const current = result?.details?.currentSessionId;
+      return renderComp(boxed([
+        dim(`Active Sessions (${sessionLines.length})`),
+        ...sessionLines.slice(0, 10).map((l: string) => {
+          const id = l.match(/`([^`]+)`/)?.[1] || "?";
+          const isCurrent = current && l.includes(current);
+          const marker = isCurrent ? bold(green("●")) : dim("○");
+          const rest = l.replace(/^- `[^`]+`/, "").trim();
+          return dim("│") + " " + marker + " " + (isCurrent ? bold(cyan(id)) : cyan(id)) + " " + dim(rest.substring(0, 50));
+        }),
+        current ? dim("└─ Default: ") + cyan(current) : "",
+      ].filter(Boolean)));
+    },
   });
 
   // ---------------------------------------------------------------------------
@@ -392,6 +520,13 @@ export default function ptySession(pi: ExtensionAPI) {
         content: [{ type: "text", text: result.formatted }],
         details: { sessionId: result.sessionId, command: result.command },
       };
+    },
+    renderCall(args: any) {
+      return renderComp([
+        dim("┌─ Executing in") + " " + cyan(args.id || "default"),
+        dim("│  ") + bold(args.command || "?"),
+        dim("└─") + " " + yellow("→ use tui_output or tui_wait to see results"),
+      ]);
     },
   });
 
@@ -426,6 +561,16 @@ export default function ptySession(pi: ExtensionAPI) {
         },
       };
     },
+    renderResult(result: any) {
+      const text = result?.content?.[0]?.text || "";
+      const screenText = text.match(/\*\*Screen\*\*:\n```\n([\s\S]*?)```/)?.[1] || "";
+      const sb = result?.details?.scrollLines ? ` +${result.details.scrollLines} scrollback lines` : "";
+      const lines = screenPreview(screenText, 6, 80);
+      return renderComp(boxed([
+        dim("Output") + sb,
+        ...lines,
+      ]));
+    },
   });
 
   // ---------------------------------------------------------------------------
@@ -452,6 +597,16 @@ export default function ptySession(pi: ExtensionAPI) {
         content: [{ type: "text", text: result.formatted }],
         details: { cursorX: result.cursorX, cursorY: result.cursorY },
       };
+    },
+    renderResult(result: any) {
+      const text = result?.content?.[0]?.text || "";
+      const screenText = text.match(/```\n([\s\S]*?)```/)?.[1] || "";
+      const hasAnsi = text.includes("```ansi");
+      const lines = screenPreview(screenText, 6, 80);
+      return renderComp(boxed([
+        dim("Screenshot") + (hasAnsi ? green(" · ANSI colors") : ""),
+        ...lines,
+      ]));
     },
   });
 
@@ -480,6 +635,23 @@ export default function ptySession(pi: ExtensionAPI) {
         content: [{ type: "text", text: result.formatted }],
         details: { found: result.found, waitedMs: result.waitedMs },
       };
+    },
+    renderCall(args: any) {
+      return renderComp([
+        dim("┌─ Waiting in") + " " + cyan(args.id || "default") + dim(` · timeout ${(args.timeout_ms ?? 30000) / 1000}s`),
+        dim("│  Pattern: ") + bold(yellow(JSON.stringify(args.pattern || "?"))),
+        dim("└─") + " " + dim("⠋ polling..."),
+      ]);
+    },
+    renderResult(result: any) {
+      const found = result?.details?.found;
+      const text = result?.content?.[0]?.text || "";
+      const screenText = text.match(/```\n([\s\S]*?)```/)?.[1] || "";
+      const lines = screenPreview(screenText, 5, 80);
+      return renderComp(boxed([
+        dim("Wait") + " " + (found ? green("Pattern found ✓") + dim(` · ${result?.details?.waitedMs}ms`) : yellow("Timeout — not found")),
+        ...lines,
+      ]));
     },
   });
 }
