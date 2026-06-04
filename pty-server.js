@@ -47,7 +47,21 @@ const KEY_MAP = {
   f1: "\x1bOP", f2: "\x1bOQ", f3: "\x1bOR", f4: "\x1bOS",
   f5: "\x1b[15~", f6: "\x1b[17~", f7: "\x1b[18~", f8: "\x1b[19~",
   f9: "\x1b[20~", f10: "\x1b[21~", f11: "\x1b[23~", f12: "\x1b[24~",
-
+  // Alt combinations (ESC + char)
+  alt_a: "\x1ba", alt_b: "\x1bb", alt_c: "\x1bc", alt_d: "\x1bd",
+  alt_e: "\x1be", alt_f: "\x1bf", alt_g: "\x1bg", alt_h: "\x1bh",
+  alt_i: "\x1bi", alt_j: "\x1bj", alt_k: "\x1bk", alt_l: "\x1bl",
+  alt_m: "\x1bm", alt_n: "\x1bn", alt_o: "\x1bo", alt_p: "\x1bp",
+  alt_q: "\x1bq", alt_r: "\x1br", alt_s: "\x1bs", alt_t: "\x1bt",
+  alt_u: "\x1bu", alt_v: "\x1bv", alt_w: "\x1bw", alt_x: "\x1bx",
+  alt_y: "\x1by", alt_z: "\x1bz",
+  alt_1: "\x1b1", alt_2: "\x1b2", alt_3: "\x1b3", alt_4: "\x1b4",
+  alt_5: "\x1b5", alt_6: "\x1b6", alt_7: "\x1b7", alt_8: "\x1b8",
+  alt_9: "\x1b9", alt_0: "\x1b0",
+  alt_enter: "\x1b\r", alt_space: "\x1b ", alt_tab: "\x1b\t",
+  alt_backspace: "\x1b\x7f", alt_delete: "\x1b\x1b[3~",
+  alt_up: "\x1b\x1b[A", alt_down: "\x1b\x1b[B",
+  alt_left: "\x1b\x1b[D", alt_right: "\x1b\x1b[C",
   // Special characters
   left_parenthesis: "(", right_parenthesis: ")",
   left_brace: "{", right_brace: "}",
@@ -203,20 +217,41 @@ function detectRegions(cells, rows, cols) {
 function captureSettled(session, options = {}) {
   const {
     maxWaitMs = 2000,
-    sampleIntervalMs = 50,
     stabilityThreshold = 2,
     histogramThreshold = 0.25,
     maskAnimations = true,
     includeAnsi = false,
+    fast = false,
   } = options;
-
+  // Fast path: single frame capture with 100ms hard timeout
+  if (fast) {
+    return new Promise((resolve) => {
+      const startTime = Date.now();
+      setTimeout(() => {
+        const { cells, cursorX, cursorY } = readBuffer(session.term);
+        const fullText = renderText(cells);
+        const rawHash = computeRawHash(cells);
+        const maskedHash = maskAnimations ? computeMaskedHash(cells, cursorX, cursorY) : rawHash;
+        const regions = detectRegions(cells, session.rows, session.cols);
+        const snapshot = { timestamp: Date.now(), rawHash, maskedHash, regions, fullText, cursorX, cursorY };
+        resolve(buildResult(snapshot, [snapshot], "fast", startTime, includeAnsi, session));
+      }, 100);
+    });
+  }
+  // Adaptive sampling: start at 100ms, drop to 50ms after first change, back to 100ms if still changing after 1s
+  const INITIAL_INTERVAL = 100;
+  const FAST_INTERVAL = 50;
+  const SLOW_INTERVAL = 100;
+  const FAST_THRESHOLD_MS = 1000;
   return new Promise((resolve) => {
     const startTime = Date.now();
     const samples = [];
     const histogram = new Map();
     let lastMaskedHash = "";
     let stableCount = 0;
-
+    let firstChangeTime = 0;
+    let currentInterval = INITIAL_INTERVAL;
+    let intervalId = null;
     const collectFrame = () => {
       const { cells, cursorX, cursorY } = readBuffer(session.term);
       const fullText = renderText(cells);
@@ -225,50 +260,65 @@ function captureSettled(session, options = {}) {
       const regions = detectRegions(cells, session.rows, session.cols);
       return { timestamp: Date.now(), rawHash, maskedHash, regions, fullText, cursorX, cursorY };
     };
-
-    samples.push(collectFrame());
-
-    const interval = setInterval(() => {
-      const snapshot = collectFrame();
-      samples.push(snapshot);
-
+    const checkStability = (snapshot) => {
       const entry = histogram.get(snapshot.maskedHash);
       if (entry) entry.count++;
       else histogram.set(snapshot.maskedHash, { count: 1, snapshot });
-
       if (snapshot.maskedHash === lastMaskedHash) {
         stableCount++;
         if (stableCount >= stabilityThreshold) {
-          clearInterval(interval);
+          clearInterval(intervalId);
           resolve(buildResult(snapshot, samples, "frame-diff", startTime, includeAnsi, session));
-          return;
+          return true;
         }
       } else {
         stableCount = 0;
         lastMaskedHash = snapshot.maskedHash;
+        if (!firstChangeTime) firstChangeTime = Date.now();
       }
-
       const total = samples.length;
       if (total >= 5) {
         for (const [, { count, snapshot: hs }] of histogram) {
           if (count / total >= histogramThreshold) {
-            clearInterval(interval);
+            clearInterval(intervalId);
             resolve(buildResult(hs, samples, "histogram", startTime, includeAnsi, session));
-            return;
+            return true;
           }
         }
       }
-
       if (Date.now() - startTime >= maxWaitMs) {
-        clearInterval(interval);
+        clearInterval(intervalId);
         let bestSnapshot = samples[samples.length - 1];
         let bestCount = 0;
         for (const [, { count, snapshot }] of histogram) {
           if (count > bestCount) { bestCount = count; bestSnapshot = snapshot; }
         }
         resolve(buildResult(bestSnapshot, samples, "timeout", startTime, includeAnsi, session));
+        return true;
       }
-    }, sampleIntervalMs);
+      // Adaptive interval: switch to fast after first change, back to slow if still changing after threshold
+      if (firstChangeTime && currentInterval !== FAST_INTERVAL) {
+        currentInterval = FAST_INTERVAL;
+        clearInterval(intervalId);
+        intervalId = setInterval(tick, FAST_INTERVAL);
+      } else if (firstChangeTime && Date.now() - firstChangeTime > FAST_THRESHOLD_MS && currentInterval !== SLOW_INTERVAL) {
+        currentInterval = SLOW_INTERVAL;
+        clearInterval(intervalId);
+        intervalId = setInterval(tick, SLOW_INTERVAL);
+      }
+      return false;
+    };
+    const tick = () => {
+      const snapshot = collectFrame();
+      samples.push(snapshot);
+      checkStability(snapshot);
+    };
+    // Initial frame
+    const initialFrame = collectFrame();
+    samples.push(initialFrame);
+    lastMaskedHash = initialFrame.maskedHash;
+    // Start sampling
+    intervalId = setInterval(tick, INITIAL_INTERVAL);
   });
 }
 
@@ -322,7 +372,22 @@ function killSession(id, force = false) {
   sessions.delete(id);
   return true;
 }
-
+function getSession(id) {
+  const s = sessions.get(id);
+  if (!s) return { error: `No active TUI session '${id}'. Open one first with tui_open. Use tui_list to see active sessions.` };
+  if (s.dead) {
+    const reason = s.exitSignal ? `signal ${s.exitSignal}` : `exit code ${s.exitCode ?? "unknown"}`;
+    return { error: `Session '${id}' has exited (${reason}). The process died — this can happen if a command had a syntax error or the shell exited. You can still capture/output the final screen for 60s. Use tui_list to see all sessions.` };
+  }
+  return { session: s };
+}
+function requireAlive(session, id) {
+  if (session.dead) {
+    const reason = session.exitSignal ? `signal ${session.exitSignal}` : `exit code ${session.exitCode ?? "unknown"}`;
+    return { error: `Session '${id}' has exited (${reason}) and cannot accept new input. The process died — this can happen if a command had a syntax error or the shell exited. Open a new session with tui_open.` };
+  }
+  return { ok: true };
+}
 // ── JSON-RPC Handler ──
 
 function send(msg) {
@@ -414,7 +479,23 @@ async function handle(msg) {
         });
 
         pty.onData((data) => term.write(data));
-
+        pty.onExit(({ exitCode, signal }) => {
+          process.stderr.write(`[pty-session] Session ${sessionId} exited (code=${exitCode}, signal=${signal})\n`);
+          const s = sessions.get(sessionId);
+          if (s) {
+            s.dead = true;
+            s.exitCode = exitCode;
+            s.exitSignal = signal;
+            s.deadAt = Date.now();
+            // Grace period: keep dead session for 60s so user can still capture/output
+            setTimeout(() => {
+              if (sessions.get(sessionId)?.dead) {
+                sessions.delete(sessionId);
+                process.stderr.write(`[pty-session] Session ${sessionId} cleaned up after grace period\n`);
+              }
+            }, 60000);
+          }
+        });
 
         const session = {
           id: sessionId, pty, term,
@@ -445,8 +526,11 @@ async function handle(msg) {
       }
 
       case "interact": {
-        const session = sessions.get(params.id);
-        if (!session) { send({ id, error: `No active TUI session '${params.id}'. Open one first with tui_open. Use tui_list to see active sessions.` }); return; }
+        const gs = getSession(params.id);
+        if (gs.error) { send({ id, error: gs.error }); return; }
+        const session = gs.session;
+        const alive = requireAlive(session, params.id);
+        if (alive.error) { send({ id, error: alive.error }); return; }
         // All keys batched into one write
         let combined = "";
         for (const key of params.keys) combined += KEY_MAP[key] ?? key;
@@ -455,12 +539,7 @@ async function handle(msg) {
           session.lastActivity = Date.now();
         } catch (e) {
           const msg = e?.message || String(e);
-          if (msg.includes("closed") || msg.includes("Socket")) {
-            sessions.delete(session.id);
-            send({ id, error: `Session '${session.id}' process exited` });
-            return;
-          }
-          send({ id, error: msg });
+          send({ id, error: `Write failed: ${msg}` });
           return;
         }
 
@@ -483,8 +562,9 @@ async function handle(msg) {
       }
 
       case "capture": {
-        const session = sessions.get(params.id);
-        if (!session) { send({ id, error: `No active TUI session '${params.id}'. Open one first with tui_open. Use tui_list to see active sessions.` }); return; }
+        const gs = getSession(params.id);
+        if (gs.error) { send({ id, error: gs.error }); return; }
+        const session = gs.session;
 
         if (params.immediate) {
           const { cells, cursorX, cursorY } = readBuffer(session.term);
@@ -509,8 +589,11 @@ async function handle(msg) {
       }
 
       case "resize": {
-        const session = sessions.get(params.id);
-        if (!session) { send({ id, error: `No active TUI session '${params.id}'. Open one first with tui_open. Use tui_list to see active sessions.` }); return; }
+        const gs = getSession(params.id);
+        if (gs.error) { send({ id, error: gs.error }); return; }
+        const session = gs.session;
+        const alive = requireAlive(session, params.id);
+        if (alive.error) { send({ id, error: alive.error }); return; }
 
         session.pty.resize(params.cols, params.rows);
         session.term.resize(params.cols, session.rows = params.rows);
@@ -532,10 +615,11 @@ async function handle(msg) {
         if (sessions.size === 0) {
           result = { formatted: "No active TUI sessions." };
         } else {
-          let out = "**Active TUI Sessions**:\n\n";
+          let out = "**TUI Sessions**:\n\n";
           for (const [id, s] of sessions) {
             const uptime = Math.round((Date.now() - s.spawnTime) / 1000);
-            out += `- \`${id}\`: ${s.command}\n  pid=${s.pty.pid}, ${s.cols}×${s.rows}, cwd=${s.cwd}\n  uptime=${uptime}s\n`;
+            const status = s.dead ? `DEAD (exit ${s.exitCode ?? s.exitSignal ?? 'unknown'})` : 'alive';
+            out += `- \`${id}\`: ${s.command} [${status}]\n  pid=${s.pty.pid}, ${s.cols}×${s.rows}, cwd=${s.cwd}\n  uptime=${uptime}s${s.dead ? ', grace=60s' : ''}\n`;
           }
           result = { formatted: out };
         }
@@ -543,8 +627,11 @@ async function handle(msg) {
       }
 
       case "send_raw": {
-        const session = sessions.get(params.id);
-        if (!session) { send({ id, error: `No active TUI session '${params.id}'. Open one first with tui_open. Use tui_list to see active sessions.` }); return; }
+        const gs = getSession(params.id);
+        if (gs.error) { send({ id, error: gs.error }); return; }
+        const session = gs.session;
+        const alive = requireAlive(session, params.id);
+        if (alive.error) { send({ id, error: alive.error }); return; }
 
         const parsed = (params.data || "")
           .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
@@ -559,8 +646,7 @@ async function handle(msg) {
           session.pty.write(parsed);
           session.lastActivity = Date.now();
         } catch (e) {
-          sessions.delete(session.id);
-          send({ id, error: `Session '${session.id}' is dead (process exited). Open a new session with tui_open.` });
+          send({ id, error: `Write failed: ${e?.message || String(e)}` });
           return;
         }
 
@@ -570,16 +656,18 @@ async function handle(msg) {
       }
 
       case "exec": {
-        const session = sessions.get(params.id);
-        if (!session) { send({ id, error: `No active TUI session '${params.id}'. Open one first with tui_open. Use tui_list to see active sessions.` }); return; }
+        const gs = getSession(params.id);
+        if (gs.error) { send({ id, error: gs.error }); return; }
+        const session = gs.session;
+        const alive = requireAlive(session, params.id);
+        if (alive.error) { send({ id, error: alive.error }); return; }
 
         const cmd = params.command + "\r\n";
         try {
           session.pty.write(cmd);
           session.lastActivity = Date.now();
         } catch (e) {
-          sessions.delete(session.id);
-          send({ id, error: `Session '${session.id}' is dead (process exited). Open a new session with tui_open.` });
+          send({ id, error: `Write failed: ${e?.message || String(e)}` });
           return;
         }
 
@@ -596,8 +684,9 @@ async function handle(msg) {
       }
 
       case "output": {
-        const session = sessions.get(params.id);
-        if (!session) { send({ id, error: `No active TUI session '${params.id}'. Open one first with tui_open. Use tui_list to see active sessions.` }); return; }
+        const gs = getSession(params.id);
+        if (gs.error) { send({ id, error: gs.error }); return; }
+        const session = gs.session;
 
         const waitMs = params.wait_ms || 0;
         if (waitMs > 0) {
@@ -640,8 +729,9 @@ async function handle(msg) {
       }
 
       case "wait": {
-        const session = sessions.get(params.id);
-        if (!session) { send({ id, error: `No active TUI session '${params.id}'. Open one first with tui_open. Use tui_list to see active sessions.` }); return; }
+        const gs = getSession(params.id);
+        if (gs.error) { send({ id, error: gs.error }); return; }
+        const session = gs.session;
 
         const pattern = params.pattern;
         const timeoutMs = params.timeout_ms || 30000;
@@ -695,3 +785,17 @@ async function handle(msg) {
 
 // Signal parent we're ready
 send({ ready: true, pid: process.pid });
+// Parent-pid heartbeat: exit if parent dies (prevents orphaned processes)
+const ppid = process.ppid;
+if (ppid) {
+  const HEARTBEAT_MS = 5000;
+  setInterval(() => {
+    try {
+      process.kill(ppid, 0); // check if parent exists
+    } catch {
+      process.stderr.write(`[pty-session] Parent ${ppid} gone, exiting\n`);
+      for (const [id] of sessions) killSession(id, true);
+      process.exit(0);
+    }
+  }, HEARTBEAT_MS);
+}

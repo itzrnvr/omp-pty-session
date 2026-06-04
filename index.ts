@@ -20,7 +20,6 @@ let serverBuffer = "";
 
 function startServer(): ChildProcess {
   if (serverProc && !serverProc.killed) return serverProc;
-
   // Resolve pty-server.js: try local (dev/test), then known extension dir (OMP runtime)
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);
@@ -202,21 +201,47 @@ export default function ptySession(pi: ExtensionAPI) {
   pi.registerTool({
     name: "tui_interact",
     label: "Interact with TUI",
-    description: "Send keystrokes to a TUI session and return the settled screen. Keystrokes are batched atomically then screen is captured after settlement. Named modifier keys: enter, escape, tab, backspace, space, up, down, left, right, home, end, pageup, pagedown, delete, insert, ctrl_a..ctrl_z, f1-f12. Special characters: left_parenthesis→(, right_parenthesis→), left_brace→{, right_brace→}, left_bracket→[, right_bracket→], pipe→|, backslash→\\, colon→:, semicolon→;, single_quote→', double_quote→\", plus→+, minus→-, and more. Any unrecognized string is typed literally. Common patterns: ['ctrl_c'] to interrupt, ['up','enter'] to recall last command, [':','w','q','enter'] for vim save+quit. For raw bytes/escape sequences use tui_send_raw.",
+    description: "Send keystrokes to a TUI session and return the settled screen. Keystrokes are batched atomically then screen is captured after settlement. Named modifier keys: enter, escape, tab, backspace, space, up, down, left, right, home, end, pageup, pagedown, delete, insert, ctrl_a..ctrl_z, alt_a..alt_z, alt_0..alt_9, alt_enter, alt_space, alt_tab, alt_backspace, alt_delete, alt_up, alt_down, alt_left, alt_right, f1-f12. Special characters: left_parenthesis→(, right_parenthesis→), left_brace→{, right_brace→}, left_bracket→[, right_bracket→], pipe→|, backslash→\\, colon→:, semicolon→;, single_quote→', double_quote→\", plus→+, minus→-, and more. Any unrecognized string is typed literally. Common patterns: ['ctrl_c'] to interrupt, ['up','enter'] to recall last command, [':','w','q','enter'] for vim save+quit, ['alt_p'] for OMP palette. For raw bytes/escape sequences use tui_send_raw.",
     parameters: z.object({
       id: z.string().optional().describe("Session ID from tui_open (defaults to last opened)"),
       keys: z.array(z.string()).describe(
-        "Keys to send as array of strings. Named modifier keys: enter, escape, tab, backspace, space, up, down, left, right, home, end, pageup, pagedown, delete, insert, ctrl_a..ctrl_z, f1-f12. Special chars use underscore names: left_parenthesis, right_parenthesis, left_brace, right_brace, pipe, backslash, colon, semicolon, single_quote, double_quote, plus, minus, etc. Unrecognized strings are typed literally."),
+        "Keys to send as array of strings. Named modifier keys: enter, escape, tab, backspace, space, up, down, left, right, home, end, pageup, pagedown, delete, insert, ctrl_a..ctrl_z, alt_a..alt_z, alt_0..alt_9, alt_enter, alt_space, alt_tab, alt_backspace, alt_delete, alt_up, alt_down, alt_left, alt_right, f1-f12. Special chars use underscore names: left_parenthesis, right_parenthesis, left_brace, right_brace, pipe, backslash, colon, semicolon, single_quote, double_quote, plus, minus, etc. Unrecognized strings are typed literally."),
+      count: z.number().default(1).describe("Number of times to repeat the key sequence (e.g., 10 to scroll down 10 lines)"),
       settle_ms: z.number().default(2000).describe("Maximum ms to wait for screen to settle after input"),
       include_ansi: z.boolean().default(false).describe("Include ANSI color codes in output"),
+      fast: z.boolean().default(false).describe("Use fast path (100ms hard timeout) for known-stable interactions like arrow keys in lists"),
+      wait: z.string().optional().describe("Wait for this text pattern to appear on screen before returning (substring match)"),
+      wait_timeout_ms: z.number().default(5000).describe("Maximum ms to wait for pattern when wait is set"),
     }),
     async execute(_tcid, params, signal, _onUpdate, _ctx) {
+      // Expand count by repeating keys
+      const expandedKeys = [];
+      for (let i = 0; i < (params.count || 1); i++) {
+        expandedKeys.push(...params.keys);
+      }
+
       const result = await call("interact", {
         id: params.id || lastSessionId,
-        keys: params.keys,
+        keys: expandedKeys,
         settle_ms: params.settle_ms,
         include_ansi: params.include_ansi,
+        fast: params.fast,
       });
+
+      // If wait pattern specified, poll for it
+      if (params.wait) {
+        const waitResult = await call("wait", {
+          id: params.id || lastSessionId,
+          pattern: params.wait,
+          timeout_ms: params.wait_timeout_ms,
+          poll_ms: 100,
+        });
+
+        return {
+          content: [{ type: "text", text: waitResult.formatted }],
+          details: { id: params.id, strategy: result.strategy, waitedMs: result.waitedMs, samples: result.samples, isStable: result.isStable, patternFound: waitResult.found },
+        };
+      }
 
       if (signal?.aborted) {
         return { content: [{ type: "text", text: "Cancelled after input" }] };
@@ -263,6 +288,7 @@ export default function ptySession(pi: ExtensionAPI) {
       settle_ms: z.number().default(1000).describe("Maximum ms to wait for settlement"),
       include_ansi: z.boolean().default(false).describe("Include ANSI color codes"),
       immediate: z.boolean().default(false).describe("Capture immediately without waiting for settlement"),
+      fast: z.boolean().default(false).describe("Use fast path (100ms hard timeout) for quick captures"),
     }),
     async execute(_tcid, params, signal, _onUpdate, _ctx) {
       const result = await call("capture", {
@@ -270,6 +296,7 @@ export default function ptySession(pi: ExtensionAPI) {
         settle_ms: params.settle_ms,
         include_ansi: params.include_ansi,
         immediate: params.immediate,
+        fast: params.fast,
       });
 
       return { content: [{ type: "text", text: result.formatted }] };
@@ -588,10 +615,12 @@ export default function ptySession(pi: ExtensionAPI) {
   pi.registerTool({
     name: "tui_exec",
     label: "Execute in TUI",
-    description: "Execute a command in an existing TUI session and return immediately WITHOUT waiting for output. The command runs asynchronously. IMPORTANT: To read the output, call tui_output afterwards (with wait_ms to give the command time to produce output), or use tui_wait to wait for a specific pattern to appear. Pattern: tui_exec → tui_output(wait_ms:500) to see results. For commands that produce output slowly, use tui_exec → tui_wait(pattern:'...') → tui_output.",
+    description: "Execute a command in an existing TUI session and return immediately WITHOUT waiting for output. The command runs asynchronously. IMPORTANT: To read the output, call tui_output afterwards (with wait_ms to give the command time to produce output), or use tui_wait to wait for a specific pattern to appear. Pattern: tui_exec → tui_output(wait_ms:500) to see results. For commands that produce output slowly, use tui_exec → tui_wait(pattern:'...') → tui_output. NOTE: Windows PowerShell does not support && chaining like bash; use semicolon ; or cmd /c for compound commands.",
     parameters: z.object({
       id: z.string().optional().describe("Session ID (defaults to last opened)"),
-      command: z.string().describe("Command to execute (will be followed by Enter)"),
+      command: z.string().describe("Command to execute (will be followed by Enter). NOTE: Windows PowerShell does not support && chaining; use ; or cmd /c for compound commands."),
+      wait: z.string().optional().describe("Wait for this text pattern to appear on screen before returning (substring match). Useful to avoid separate tui_output call."),
+      wait_timeout_ms: z.number().default(30000).describe("Maximum ms to wait for pattern when wait is set"),
     }),
     async execute(_tcid, params, _signal, _onUpdate, _ctx) {
       const result = await call("exec", {
@@ -599,29 +628,25 @@ export default function ptySession(pi: ExtensionAPI) {
         command: params.command,
       });
 
+      // If wait pattern specified, poll for it
+      if (params.wait) {
+        const waitResult = await call("wait", {
+          id: params.id || lastSessionId,
+          pattern: params.wait,
+          timeout_ms: params.wait_timeout_ms,
+          poll_ms: 200,
+        });
+
+        return {
+          content: [{ type: "text", text: waitResult.formatted }],
+          details: { sessionId: result.sessionId, command: result.command, patternFound: waitResult.found, waitedMs: waitResult.waitedMs },
+        };
+      }
+
       return {
         content: [{ type: "text", text: result.formatted }],
         details: { sessionId: result.sessionId, command: result.command },
       };
-    },
-    renderCall(args: any, theme: any) {
-      const sid = args.id || lastSessionId || "?";
-      return renderComp([
-        theme.fg("muted", "── ") + theme.fg("accent", "tui_exec") + theme.fg("muted", " · executing ") + theme.fg("fg", "\"" + (args.command || "?") + "\"") + theme.fg("muted", " ──"),
-        theme.fg("muted", "  Session: ") + theme.fg("fg", sid),
-        theme.fg("muted", "  ") + theme.fg("fg", "⠋ executing..."),
-      ]);
-    },
-    renderResult(result: any, options: any, theme: any) {
-      const dur = result?.meta?.durationMs != null ? result.meta.durationMs + "ms" : "";
-      const cmd = result?.details?.command || options?.command || "?";
-      const sid = result?.details?.sessionId || options?.id || lastSessionId || "?";
-      const durStr = dur ? theme.fg("muted", " · ") + theme.fg("fg", dur) : "";
-      return renderComp([
-        theme.fg("muted", "── ") + theme.fg("success", "✓") + " " + theme.fg("accent", "tui_exec") + theme.fg("muted", " · ") + theme.fg("fg", cmd) + durStr + theme.fg("muted", " ──"),
-        theme.fg("muted", "  Session: ") + theme.fg("fg", sid),
-        theme.fg("muted", "──"),
-      ]);
     },
   });
 
